@@ -1,0 +1,8 @@
+streamlit>=1.34
+pandas>=2.0
+numpy
+scikit-learn>=1.4
+mlxtend
+matplotlib
+plotly
+openpyxl
