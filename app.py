@@ -45,7 +45,7 @@ tab_titles = [
 ]
 tabs = st.tabs(tab_titles)
 
-# ALWAYS prompt user to upload the Excel file at runtime
+# Data upload required every time
 st.sidebar.info("Please upload your cleaned Excel dataset (.xlsx)")
 uploaded_file = st.sidebar.file_uploader("Upload cleaned dataset", type=["xlsx"])
 if uploaded_file is None:
@@ -115,7 +115,6 @@ with tabs[1]:
     num_cols_X = X.select_dtypes(include=["int64", "float64"]).columns.tolist()
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
 
-    # Robust: Dynamically find all unique labels
     all_labels = sorted(set(y_train) | set(y_test))
     is_binary = len(all_labels) == 2
     pos_label = all_labels[-1] if is_binary else None
@@ -167,7 +166,13 @@ with tabs[1]:
         st.session_state[f"pipe_{name}"] = pipe
 
     met_df = pd.DataFrame(metric_rows, columns=["Model","Accuracy","Precision","Recall","F1"])
-    st.dataframe(met_df.style.format("{:.2%}"))
+    # Only format numeric columns—no error!
+    st.dataframe(met_df.style.format({
+        "Accuracy": "{:.2%}",
+        "Precision": "{:.2%}",
+        "Recall": "{:.2%}",
+        "F1": "{:.2%}"
+    }))
     sel = st.selectbox("Show Confusion Matrix for:", list(models.keys()))
     pipe = st.session_state[f"pipe_{sel}"]
     y_cm_pred = pipe.predict(X_test)
@@ -289,7 +294,7 @@ with tabs[4]:
             feat_imp[n] = reg.coef_
         elif hasattr(reg, "feature_importances_"):
             feat_imp[n] = reg.feature_importances_
-    st.dataframe(pd.DataFrame(rows, columns=["Model","R² (test)"]).style.format("{:.3f}"))
+    st.dataframe(pd.DataFrame(rows, columns=["Model","R² (test)"]).style.format({"R² (test)": "{:.3f}"}))
     dt_imp = feat_imp["Decision Tree"]
     fi = pd.DataFrame({"Feature": cat_cols_reg + num_cols_reg, "Importance": dt_imp})
     top8 = fi.sort_values("Importance", ascending=False).head(8)
