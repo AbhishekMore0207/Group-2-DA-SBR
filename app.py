@@ -40,8 +40,7 @@ tab_titles = [
     "🎯 Classification",
     "🧩 Clustering",
     "🔗 Association Rules",
-    "📈 Regression",
-    "🍾 3D Product View"
+    "📈 Regression"
 ]
 tabs = st.tabs(tab_titles)
 
@@ -166,7 +165,6 @@ with tabs[1]:
         st.session_state[f"pipe_{name}"] = pipe
 
     met_df = pd.DataFrame(metric_rows, columns=["Model","Accuracy","Precision","Recall","F1"])
-    # Only format numeric columns—no error!
     st.dataframe(met_df.style.format({
         "Accuracy": "{:.2%}",
         "Precision": "{:.2%}",
@@ -181,6 +179,8 @@ with tabs[1]:
     fig, ax = plt.subplots()
     ConfusionMatrixDisplay(cm, display_labels=cm_labels).plot(ax=ax)
     st.pyplot(fig)
+
+    # Always show ROC Curve for binary classification after confusion matrix
     if is_binary and any(roc_info.values()):
         fig, ax = plt.subplots()
         for name, (fpr, tpr, auc_score) in roc_info.items():
@@ -190,131 +190,11 @@ with tabs[1]:
         ax.set_title("ROC Curves (all models)")
         ax.legend()
         st.pyplot(fig)
+
     rf_imp = st.session_state["pipe_Random Forest"].named_steps["clf"].feature_importances_
     feats = pd.DataFrame({"Feature": cat_cols_X + num_cols_X, "Importance": rf_imp})
     top5 = feats.sort_values("Importance", ascending=False).head(5)
     fig = px.bar(top5, x="Feature", y="Importance", title="Top-5 Predictive Features")
     st.plotly_chart(fig)
     st.subheader("📤 Predict on New Data")
-    up = st.file_uploader("Upload CSV (no target column)", type=["csv"])
-    if up:
-        new_df = pd.read_csv(up)
-        new_df = new_df.dropna()
-        preds = st.session_state["pipe_Random Forest"].predict(new_df)
-        new_df["Predicted_Support"] = preds
-        csv_out = new_df.to_csv(index=False).encode()
-        st.download_button("📥 Download Predictions", data=csv_out, file_name="support_predictions.csv", mime="text/csv")
-        st.write("Preview", new_df.head())
-
-# 3) CLUSTERING
-with tabs[2]:
-    st.header("Customer Segmentation (K-means)")
-    cluster_num_cols = df.select_dtypes(include=["int64", "float64"]).columns.tolist()
-    cluster_df = df.dropna(subset=cluster_num_cols).copy()
-    k = st.slider("Number of clusters", 2, 10, 4)
-    inertias = []
-    for i in range(2, 11):
-        km = KMeans(n_clusters=i, n_init="auto", random_state=42)
-        km.fit(cluster_df[cluster_num_cols])
-        inertias.append(km.inertia_)
-    fig, ax = plt.subplots()
-    ax.plot(range(2,11), inertias, marker="o")
-    ax.set_xlabel("k"); ax.set_ylabel("Inertia"); ax.set_title("Elbow Method")
-    st.pyplot(fig)
-    km = KMeans(n_clusters=k, n_init="auto", random_state=42)
-    cluster_df["Cluster"] = km.fit_predict(cluster_df[cluster_num_cols])
-    persona = cluster_df.groupby("Cluster").agg({
-        "Age":"median",
-        "Income_kUSD":"median",
-        "Drinks_Per_Week":"median",
-        "Preferred_Drink":lambda x: x.mode()[0] if len(x.mode()) else np.nan,
-        "Brand_Loyalty":lambda x: x.mode()[0] if len(x.mode()) else np.nan
-    }).rename(columns={
-        "Age":"Median Age",
-        "Income_kUSD":"Median Income (kUSD)",
-        "Drinks_Per_Week":"Drinks/Week",
-        "Preferred_Drink":"Fav Drink",
-        "Brand_Loyalty":"Typical Loyalty"
-    })
-    st.dataframe(persona)
-    st.download_button("Download CSV with clusters", data=cluster_df.to_csv(index=False).encode(), file_name="clustered_data.csv", mime="text/csv")
-
-# 4) ASSOCIATION RULE MINING
-with tabs[3]:
-    st.header("Association Rule Mining (Apriori)")
-    ar_cat_cols = df.select_dtypes(include="object").columns.tolist()
-    cols = st.multiselect("Columns to mine", ar_cat_cols, default=["Preferred_Drink","Purchase_Channel"] if "Preferred_Drink" in ar_cat_cols and "Purchase_Channel" in ar_cat_cols else ar_cat_cols[:2])
-    min_sup = st.slider("Min support (%)", 1, 20, 5) / 100
-    min_conf = st.slider("Min confidence (%)", 5, 80, 30) / 100
-    if cols:
-        ar_df = df.dropna(subset=cols)
-        basket = pd.get_dummies(ar_df[cols])
-        freq = apriori(basket, min_support=min_sup, use_colnames=True)
-        rules = association_rules(freq, metric="confidence", min_threshold=min_conf).sort_values("confidence", ascending=False).head(10)
-        st.dataframe(rules[["antecedents","consequents","support","confidence","lift"]])
-        st.subheader("🧠 Rule Insights")
-        if rules.empty:
-            st.warning("No rules meet the chosen thresholds.")
-        else:
-            for _, row in rules.iterrows():
-                ant = ', '.join(row['antecedents'])
-                con = ', '.join(row['consequents'])
-                st.markdown(f"- **{ant} → {con}** &nbsp; (conf {row.confidence:.0%}, lift {row.lift:.2f})")
-
-# 5) REGRESSION
-with tabs[4]:
-    st.header("Predict Monthly Spend (Regression)")
-    target_reg = "Monthly_Spend_USD"
-    feature_cols_reg = [col for col in df.columns if col != target_reg]
-    y_reg = df[target_reg]
-    X_reg = df[feature_cols_reg]
-    reg_df = pd.concat([X_reg, y_reg], axis=1).dropna(subset=feature_cols_reg + [target_reg])
-    X_reg = reg_df[feature_cols_reg]
-    y_reg = reg_df[target_reg]
-    cat_cols_reg = X_reg.select_dtypes(include="object").columns.tolist()
-    num_cols_reg = X_reg.select_dtypes(include=["int64", "float64"]).columns.tolist()
-    Xr_train, Xr_test, yr_train, yr_test = train_test_split(X_reg, y_reg, test_size=0.2, random_state=42)
-    pre_r = ColumnTransformer([
-        ("cat", OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1), cat_cols_reg),
-        ("num", StandardScaler(), num_cols_reg)
-    ])
-    regs = {
-        "Linear":  LinearRegression(),
-        "Ridge":   Ridge(alpha=1.0),
-        "Lasso":   Lasso(alpha=0.1),
-        "Decision Tree": DecisionTreeRegressor(random_state=42)
-    }
-    rows, feat_imp = [], {}
-    for n, reg in regs.items():
-        pipe = Pipeline([("prep", pre_r), ("reg", reg)])
-        pipe.fit(Xr_train, yr_train)
-        score = pipe.score(Xr_test, yr_test)
-        rows.append([n, score])
-        if hasattr(reg, "coef_"):
-            feat_imp[n] = reg.coef_
-        elif hasattr(reg, "feature_importances_"):
-            feat_imp[n] = reg.feature_importances_
-    st.dataframe(pd.DataFrame(rows, columns=["Model","R² (test)"]).style.format({"R² (test)": "{:.3f}"}))
-    dt_imp = feat_imp["Decision Tree"]
-    fi = pd.DataFrame({"Feature": cat_cols_reg + num_cols_reg, "Importance": dt_imp})
-    top8 = fi.sort_values("Importance", ascending=False).head(8)
-    fig = px.bar(top8, x="Feature", y="Importance", title="Top Spend Drivers (Decision Tree)")
-    st.plotly_chart(fig)
-
-# 6) 3-D PRODUCT VIEW
-with tabs[5]:
-    st.header("360° Product Viewer")
-    st.markdown("Rotate, zoom, and inspect packaging details.")
-    viewer = """
-      <script type="module"
-              src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
-      <model-viewer src="https://modelviewer.dev/shared-assets/models/BeerBottle.glb"
-                    camera-controls auto-rotate
-                    style="width:100%; height:600px;"></model-viewer>
-    """
-    st.components.v1.html(viewer, height=620, scrolling=False)
-
-if st.session_state.get("notes"):
-    st.sidebar.subheader("💬 Stored Notes")
-    for i, n in enumerate(st.session_state["notes"], 1):
-        st.sidebar.markdown(f"**{i}.** {n}")
+    up = st.f
