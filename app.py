@@ -129,12 +129,18 @@ with tabs[1]:
         "Gradient Boosting": GradientBoostingClassifier(random_state=42)
     }
     roc_info, metric_rows = {}, []
+    roc_available = False
     for name, clf in models.items():
         pipe = Pipeline([("prep", pre), ("clf", clf)])
         pipe.fit(X_train, y_train)
         y_pred = pipe.predict(X_test)
-        if hasattr(clf, "predict_proba") and is_binary:
+        # For ROC: check binary, classifier supports prob, positive label in test, two unique test labels
+        if hasattr(clf, "predict_proba") and is_binary and len(set(y_test))==2:
             probs = pipe.predict_proba(X_test)[:, list(pipe.classes_).index(pos_label)]
+            binarized_y = np.array([1 if v == pos_label else 0 for v in y_test])
+            fpr, tpr, _ = roc_curve(binarized_y, probs)
+            roc_info[name] = (fpr, tpr, auc(fpr, tpr))
+            roc_available = True
         else:
             probs = None
 
@@ -158,10 +164,6 @@ with tabs[1]:
             recall,
             f1
         ])
-        if probs is not None and is_binary and (pos_label in labels_in_test):
-            binarized_y = [1 if v == pos_label else 0 for v in y_test]
-            fpr, tpr, _ = roc_curve(binarized_y, probs)
-            roc_info[name] = (fpr, tpr, auc(fpr, tpr))
         st.session_state[f"pipe_{name}"] = pipe
 
     met_df = pd.DataFrame(metric_rows, columns=["Model","Accuracy","Precision","Recall","F1"])
@@ -180,8 +182,8 @@ with tabs[1]:
     ConfusionMatrixDisplay(cm, display_labels=cm_labels).plot(ax=ax)
     st.pyplot(fig)
 
-    # Always show ROC Curve for binary classification after confusion matrix
-    if is_binary and any(roc_info.values()):
+    # Show ROC Curve if available for binary classification
+    if is_binary and roc_available:
         fig, ax = plt.subplots()
         for name, (fpr, tpr, auc_score) in roc_info.items():
             ax.plot(fpr, tpr, label=f"{name} (AUC={auc_score:.2f})")
@@ -190,6 +192,8 @@ with tabs[1]:
         ax.set_title("ROC Curves (all models)")
         ax.legend()
         st.pyplot(fig)
+    elif is_binary:
+        st.info("ROC curve is not available due to insufficient data or missing probability estimates.")
 
     rf_imp = st.session_state["pipe_Random Forest"].named_steps["clf"].feature_importances_
     feats = pd.DataFrame({"Feature": cat_cols_X + num_cols_X, "Importance": rf_imp})
